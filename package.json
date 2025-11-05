@@ -1,0 +1,50 @@
+{
+  "name": "finverse-test",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "start": "node ./index.js",
+    "start:watch": "nodemon ./index.js",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch --runInBand",
+    "test:coverage": "jest --coverage --runInBand",
+    "test:health": "jest tests/01-agent-health.test.js",
+    "test:db": "jest tests/02-database-connection.test.js",
+    "test:smart-fields": "jest tests/03-smart-fields.test.js",
+    "test:workflows": "jest tests/04-onboarding-workflow.test.js tests/05-aml-monitoring.test.js",
+    "test:rbac": "jest tests/06-rbac.test.js",
+    "test:segments": "jest tests/07-segments.test.js",
+    "test:actions": "jest tests/08-smart-actions.test.js",
+    "test:performance": "jest tests/09-performance.test.js",
+    "test:demo": "jest tests/10-demo-validation.test.js",
+    "seed:test": "node seeds/test-data-seeder.js",
+    "demo:validate": "npm run test:demo && npm run test:performance"
+  },
+  "nodemonConfig": {
+    "ignore": [
+      "./forestadmin-schema.json"
+    ]
+  },
+  "dependencies": {
+    "@forestadmin/agent": "^1.0.0",
+    "@forestadmin/datasource-sql": "^1.0.0",
+    "forest-express-sequelize": "^9.6.1",
+    "pg": "^8.8.0"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "^10.1.0",
+    "axios": "^1.13.1",
+    "dotenv": "^17.2.3",
+    "jest": "^30.2.0",
+    "nodemon": "^3.1.10",
+    "supertest": "^7.1.4"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testTimeout": 30000,
+    "verbose": true,
+    "collectCoverageFrom": [
+      "index.js"
+    ]
+  }
+}

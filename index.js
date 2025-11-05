@@ -165,7 +165,6 @@ function getUserRole(userEmail) {
   
   const email = userEmail.toLowerCase();
   
-  // Email-based role detection (enhance with users table lookup in production)
   if (email.includes('admin')) return ROLES.ADMIN;
   if (email.includes('compliance-lead') || email.includes('lead')) return ROLES.COMPLIANCE_LEAD;
   if (email.includes('compliance') || email.includes('analyst')) return ROLES.COMPLIANCE_ANALYST;
@@ -177,10 +176,8 @@ function getUserRole(userEmail) {
 }
 
 function hasPermission(userEmail, permission) {
-  // DEMO MODE: Bypass all permission checks
   if (DEMO_MODE) return true;
   
-  // Normal permission checking (for production)
   const role = getUserRole(userEmail);
   const userPermissions = PERMISSION_MATRIX[role] || [];
   return userPermissions.includes(permission) || userPermissions.includes('view_all');
@@ -210,132 +207,147 @@ function formatCurrency(cents, currency = 'EUR') {
 }
 
 function getTimeSince(date) {
-  if (!date) return 'Unknown';
-  const now = new Date();
-  const past = new Date(date);
-  const hours = Math.floor((now - past) / (1000 * 60 * 60));
+  if (!date) return 'Never';
   
-  if (hours < 1) return '🔥 < 1 hour';
-  if (hours < 24) return `⚡ ${hours} hours`;
-  if (hours < 168) return `📅 ${Math.floor(hours / 24)} days`;
-  return `📆 ${Math.floor(hours / 168)} weeks`;
-}
-
-function getRiskScoreBadge(score) {
-  if (score === null || score === undefined) return '⚪ Not Assessed';
-  if (score >= 80) return '🔴 Critical Risk';
-  if (score >= 60) return '🟠 High Risk';
-  if (score >= 40) return '🟡 Medium Risk';
-  if (score >= 20) return '🔵 Low Risk';
-  return '🟢 Minimal Risk';
-}
-
-function getOnboardingStatusBadge(status) {
-  const badges = {
-    'submitted': '⏳ Submitted',
-    'in_review': '🔍 Under Review',
-    'more_info': '📄 More Info Needed',
-    'approved': '✅ Approved',
-    'rejected': '❌ Rejected'
+  const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+  
+  const intervals = {
+    year: 31536000,
+    month: 2592000,
+    week: 604800,
+    day: 86400,
+    hour: 3600,
+    minute: 60
   };
-  return badges[status] || '❓ Unknown';
+  
+  for (const [name, secondsInInterval] of Object.entries(intervals)) {
+    const interval = Math.floor(seconds / secondsInInterval);
+    if (interval >= 1) {
+      return `${interval} ${name}${interval !== 1 ? 's' : ''} ago`;
+    }
+  }
+  
+  return 'Just now';
+}
+
+function getRiskBadge(score) {
+  if (score >= 80) return '🔴 Critical';
+  if (score >= 60) return '🟠 High';
+  if (score >= 40) return '🟡 Medium';
+  return '🟢 Low';
+}
+
+function getStatusIcon(status) {
+  const icons = {
+    submitted: '📝',
+    in_review: '👀',
+    approved: '✅',
+    rejected: '❌',
+    more_info: '❓',
+    open: '🔓',
+    triaged: '🔍',
+    escalated: '⚠️',
+    dismissed: '✖️',
+    closed: '✅',
+    active: '✅',
+    frozen: '🧊',
+    in: '⬇️',
+    out: '⬆️'
+  };
+  return icons[status] || '📌';
 }
 
 // ========================================
-// APPLICATIONS COLLECTION (ONBOARDING)
+// APPLICATIONS COLLECTION - ONBOARDING
 // ========================================
 
 agent.customizeCollection('applications', collection => {
   
-  // ========================================
-  // SMART FIELDS FOR ONBOARDING
-  // ========================================
+  // ====== SMART FIELDS ======
   
-  collection.addField('onboardingStatusBadge', {
+  collection.addField('statusBadge', {
     columnType: 'String',
     dependencies: ['status'],
-    getValues: (records) => records.map((r) => getOnboardingStatusBadge(r.status)),
+    getValues: (records) => records.map((r) => `${getStatusIcon(r.status)} ${r.status?.toUpperCase() || 'UNKNOWN'}`),
   });
 
-  collection.addField('riskScoreBadge', {
+  collection.addField('riskBadge', {
     columnType: 'String',
     dependencies: ['risk_score'],
-    getValues: (records) => records.map((r) => getRiskScoreBadge(r.risk_score)),
+    getValues: (records) => records.map((r) => getRiskBadge(r.risk_score || 0)),
   });
 
-  collection.addField('kycLevelBadge', {
+  collection.addField('kycBadge', {
     columnType: 'String',
     dependencies: ['kyc_level'],
     getValues: (records) => records.map((r) => {
       const badges = {
-        'basic': '🔵 Basic',
-        'standard': '🟢 Standard',
-        'enhanced': '🟠 Enhanced'
+        basic: '🟢 Basic',
+        standard: '🟡 Standard',
+        enhanced: '🔴 Enhanced'
       };
-      return badges[r.kyc_level] || '❓ Unknown';
+      return badges[r.kyc_level] || '⚪ Unknown';
     }),
   });
 
-  collection.addField('sanctionsStatus', {
+  collection.addField('sanctionsBadge', {
     columnType: 'String',
     dependencies: ['sanctions_hits'],
     getValues: (records) => records.map((r) => {
-      if (r.sanctions_hits === 0) return '✅ Clear';
-      if (r.sanctions_hits === 1) return '⚠️ 1 Hit';
-      return `🚨 ${r.sanctions_hits} Hits`;
+      const hits = r.sanctions_hits || 0;
+      if (hits === 0) return '✅ No Hits';
+      if (hits <= 2) return `⚠️ ${hits} Hits`;
+      return `🚨 ${hits} Hits`;
     }),
   });
 
-  collection.addField('applicationAge', {
+  collection.addField('ageInSystem', {
     columnType: 'String',
     dependencies: ['submitted_at'],
     getValues: (records) => records.map((r) => getTimeSince(r.submitted_at)),
   });
 
-  collection.addField('priorityLevel', {
+  collection.addField('reviewerBadge', {
     columnType: 'String',
-    dependencies: ['risk_score', 'submitted_at', 'sanctions_hits'],
+    dependencies: ['reviewer'],
+    getValues: (records) => records.map((r) => r.reviewer ? `👤 ${r.reviewer}` : '⚪ Unassigned'),
+  });
+
+  collection.addField('quickSummary', {
+    columnType: 'String',
+    dependencies: ['status', 'risk_score', 'kyc_level', 'sanctions_hits'],
     getValues: (records) => records.map((r) => {
-      const age = new Date() - new Date(r.submitted_at);
-      const daysOld = age / (1000 * 60 * 60 * 24);
-      
-      if (r.sanctions_hits > 0 || r.risk_score >= 80 || daysOld > 7) return '🚨 URGENT';
-      if (r.risk_score >= 60 || daysOld > 3) return '⚠️ HIGH';
-      if (r.risk_score >= 40 || daysOld > 1) return '📌 MEDIUM';
-      return '📋 NORMAL';
+      return `${getStatusIcon(r.status)} Status: ${r.status} | Risk: ${r.risk_score || 0} | KYC: ${r.kyc_level} | Sanctions: ${r.sanctions_hits || 0}`;
     }),
   });
 
-  // ========================================
-  // WORKSPACES (SEGMENTS) FOR COMPLIANCE TEAM
-  // ========================================
+  // ====== WORKSPACES / SEGMENTS ======
   
-  // INBOX - Priority items for compliance team
-  collection.addSegment('📥 Compliance Inbox', async (context) => {
-    return {
-      aggregator: 'Or',
-      conditions: [
-        { field: 'status', operator: 'Equal', value: 'submitted' },
-        { field: 'status', operator: 'Equal', value: 'in_review' },
-        { field: 'risk_score', operator: 'GreaterThan', value: 60 },
-        { field: 'sanctions_hits', operator: 'GreaterThan', value: 0 }
-      ]
-    };
-  });
-
-  collection.addSegment('⏳ Submitted', async () => ({
+  collection.addSegment('📥 Inbox: New Submissions', async () => ({
     field: 'status',
     operator: 'Equal',
     value: 'submitted'
   }));
 
-  collection.addSegment('🔍 Under Review', async () => ({
+  collection.addSegment('👀 In Review', async () => ({
     field: 'status',
     operator: 'Equal',
     value: 'in_review'
   }));
 
-  collection.addSegment('📄 Need More Info', async () => ({
+  collection.addSegment('✅ Approved Applications', async () => ({
+    field: 'status',
+    operator: 'Equal',
+    value: 'approved'
+  }));
+
+  collection.addSegment('❌ Rejected Applications', async () => ({
+    field: 'status',
+    operator: 'Equal',
+    value: 'rejected'
+  }));
+
+  collection.addSegment('❓ Waiting for Info', async () => ({
     field: 'status',
     operator: 'Equal',
     value: 'more_info'
@@ -353,312 +365,375 @@ agent.customizeCollection('applications', collection => {
     value: 0
   }));
 
-  collection.addSegment('✅ Recently Approved', async () => {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    
-    return {
-      aggregator: 'And',
-      conditions: [
-        { field: 'status', operator: 'Equal', value: 'approved' },
-        { field: 'submitted_at', operator: 'GreaterThan', value: sevenDaysAgo.toISOString() }
-      ]
-    };
-  });
-
-  collection.addSegment('❌ Recently Rejected', async () => {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    
-    return {
-      aggregator: 'And',
-      conditions: [
-        { field: 'status', operator: 'Equal', value: 'rejected' },
-        { field: 'submitted_at', operator: 'GreaterThan', value: sevenDaysAgo.toISOString() }
-      ]
-    };
-  });
-
-  collection.addSegment('⏰ Overdue (>3 days)', async () => {
-    const threeDaysAgo = new Date();
-    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-    
-    return {
-      aggregator: 'And',
-      conditions: [
-        { field: 'status', operator: 'In', value: ['submitted', 'in_review'] },
-        { field: 'submitted_at', operator: 'LessThan', value: threeDaysAgo.toISOString() }
-      ]
-    };
-  });
-
-  collection.addSegment('🟠 Enhanced KYC', async () => ({
+  collection.addSegment('🔍 Enhanced KYC Required', async () => ({
     field: 'kyc_level',
     operator: 'Equal',
     value: 'enhanced'
   }));
 
-  // ========================================
-  // SMART ACTIONS FOR ONBOARDING
-  // ========================================
+  collection.addSegment('⏰ Pending >24h', async () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    return {
+      aggregator: 'And',
+      conditions: [
+        { field: 'status', operator: 'In', value: ['submitted', 'in_review'] },
+        { field: 'submitted_at', operator: 'LessThan', value: yesterday.toISOString() }
+      ]
+    };
+  });
 
-  // APPROVE APPLICATION
+  collection.addSegment('📅 This Week', async () => {
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    
+    return {
+      field: 'submitted_at',
+      operator: 'GreaterThan',
+      value: weekAgo.toISOString()
+    };
+  });
+
+  collection.addSegment('👤 My Applications', async (context) => ({
+    field: 'reviewer',
+    operator: 'Equal',
+    value: context.caller.email
+  }));
+
+  collection.addSegment('⚪ Unassigned', async () => ({
+    field: 'reviewer',
+    operator: 'Blank'
+  }));
+
+  // ====== SMART ACTIONS ======
+  
+  // Single Application Actions
   collection.addAction('✅ Approve Application', {
     scope: 'Single',
     execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'approve_application')) {
+      if (!hasPermission(context.caller.email, 'approve_application')) {
         return resultBuilder.error('❌ You do not have permission to approve applications');
       }
+
+      const application = await context.getRecord(['id', 'customer_id', 'status']);
       
-      const recordId = await context.getRecordId();
-      const record = await context.getRecord(['status', 'customer_id']);
-      
-      if (record.status === 'approved') {
-        return resultBuilder.error('This application is already approved');
+      if (application.status === 'approved') {
+        return resultBuilder.error('❌ This application is already approved');
       }
-      
-      // Update application status
-      await context.dataSource.getCollection('applications').update(
-        { conditionTree: { field: 'id', operator: 'Equal', value: recordId } },
-        { status: 'approved', reviewer: userEmail }
-      );
-      
-      // Log audit
-      await context.dataSource.getCollection('audit_log').create([{
-        actor: userEmail,
+
+      await context.dataSource
+        .getCollection('applications')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: application.id }], {
+          status: 'approved',
+          reviewer: context.caller.email
+        });
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
         action: 'application_approved',
         entity: 'application',
-        entity_id: recordId,
-        payload: { previous_status: record.status, demo_mode: DEMO_MODE },
-        created_at: new Date()
+        entity_id: application.id,
+        payload: { customer_id: application.customer_id, previous_status: application.status }
       }]);
-      
-      // Add note
-      await context.dataSource.getCollection('notes').create([{
-        id: require('crypto').randomUUID(),
-        entity_type: 'application',
-        entity_id: recordId,
-        author: userEmail,
-        body: 'Application approved',
-        created_at: new Date()
-      }]);
-      
-      return resultBuilder.success('✅ Application approved successfully');
+
+      return resultBuilder.success('✅ Application approved successfully!');
     },
   });
 
-  // REJECT APPLICATION
   collection.addAction('❌ Reject Application', {
     scope: 'Single',
     form: [
       {
         label: 'Rejection Reason',
-        type: 'String',
+        type: 'TextArea',
         isRequired: true,
-        widget: 'TextArea',
-      },
-      {
-        label: 'Risk Factors',
-        type: 'StringList',
-        widget: 'CheckboxGroup',
-        options: [
-          'AML Risk', 'Document Issues', 'Verification Failed', 
-          'Sanctions Match', 'PEP', 'Adverse Media', 'Other'
-        ],
-      },
+        description: 'Provide a detailed reason for rejection'
+      }
     ],
     execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'reject_application')) {
+      if (!hasPermission(context.caller.email, 'reject_application')) {
         return resultBuilder.error('❌ You do not have permission to reject applications');
       }
-      
-      const recordId = await context.getRecordId();
+
+      const application = await context.getRecord(['id', 'customer_id', 'status']);
       const reason = context.formValues['Rejection Reason'];
-      const riskFactors = context.formValues['Risk Factors'];
-      
-      // Update application
-      await context.dataSource.getCollection('applications').update(
-        { conditionTree: { field: 'id', operator: 'Equal', value: recordId } },
-        { 
+
+      if (application.status === 'rejected') {
+        return resultBuilder.error('❌ This application is already rejected');
+      }
+
+      await context.dataSource
+        .getCollection('applications')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: application.id }], {
           status: 'rejected',
-          reviewer: userEmail,
+          reviewer: context.caller.email,
           notes: reason
-        }
-      );
-      
-      // Add note
-      await context.dataSource.getCollection('notes').create([{
-        id: require('crypto').randomUUID(),
-        entity_type: 'application',
-        entity_id: recordId,
-        author: userEmail,
-        body: `Application rejected. Reason: ${reason}. Risk Factors: ${riskFactors?.join(', ') || 'None specified'}`,
-        created_at: new Date()
-      }]);
-      
-      // Log audit
-      await context.dataSource.getCollection('audit_log').create([{
-        actor: userEmail,
+        });
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
         action: 'application_rejected',
         entity: 'application',
-        entity_id: recordId,
-        payload: { reason, risk_factors: riskFactors, demo_mode: DEMO_MODE },
-        created_at: new Date()
+        entity_id: application.id,
+        payload: { customer_id: application.customer_id, reason, previous_status: application.status }
       }]);
-      
-      return resultBuilder.success('❌ Application rejected');
+
+      return resultBuilder.success(`❌ Application rejected. Reason: ${reason}`);
     },
   });
 
-  // REQUEST MORE INFORMATION
-  collection.addAction('📋 Request More Information', {
+  collection.addAction('❓ Request More Information', {
     scope: 'Single',
     form: [
       {
-        label: 'Required Documents',
-        type: 'StringList',
-        widget: 'CheckboxGroup',
-        options: ['ID Document', 'Proof of Address', 'Bank Statement', 'Tax Documents', 'Business Registration', 'Other'],
-      },
-      {
-        label: 'Additional Notes',
-        type: 'String',
-        widget: 'TextArea',
-      },
+        label: 'Information Needed',
+        type: 'TextArea',
+        isRequired: true,
+        description: 'Specify what additional information is required'
+      }
     ],
     execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'request_more_info')) {
+      if (!hasPermission(context.caller.email, 'request_more_info')) {
         return resultBuilder.error('❌ You do not have permission to request information');
       }
-      
-      const recordId = await context.getRecordId();
-      const documents = context.formValues['Required Documents'];
-      const notes = context.formValues['Additional Notes'];
-      
-      // Update status
-      await context.dataSource.getCollection('applications').update(
-        { conditionTree: { field: 'id', operator: 'Equal', value: recordId } },
-        { 
+
+      const application = await context.getRecord(['id', 'customer_id']);
+      const info = context.formValues['Information Needed'];
+
+      await context.dataSource
+        .getCollection('applications')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: application.id }], {
           status: 'more_info',
-          notes: `Documents required: ${documents?.join(', ')}. ${notes || ''}`
-        }
-      );
-      
-      // Add note
-      await context.dataSource.getCollection('notes').create([{
-        id: require('crypto').randomUUID(),
-        entity_type: 'application',
-        entity_id: recordId,
-        author: userEmail,
-        body: `Documents requested: ${documents?.join(', ')}. ${notes || ''}`,
-        created_at: new Date()
+          reviewer: context.caller.email,
+          notes: info
+        });
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
+        action: 'information_requested',
+        entity: 'application',
+        entity_id: application.id,
+        payload: { customer_id: application.customer_id, info_needed: info }
       }]);
-      
-      return resultBuilder.success(`📋 Information request sent. Waiting for: ${documents?.join(', ')}`);
+
+      return resultBuilder.success(`❓ Information requested: ${info}`);
     },
   });
 
-  // BULK APPROVE
-  collection.addAction('✅ Bulk Approve Applications', {
-    scope: 'Bulk',
+  collection.addAction('👤 Assign to Me', {
+    scope: 'Single',
+    execute: async (context, resultBuilder) => {
+      const application = await context.getRecord(['id']);
+
+      await context.dataSource
+        .getCollection('applications')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: application.id }], {
+          reviewer: context.caller.email
+        });
+
+      return resultBuilder.success(`✅ Application assigned to ${context.caller.email}`);
+    },
+  });
+
+  collection.addAction('👥 Reassign Application', {
+    scope: 'Single',
     form: [
       {
-        label: 'Approval Note',
+        label: 'Assign To',
         type: 'String',
-        widget: 'TextArea',
-      },
+        isRequired: true,
+        description: 'Email of the team member'
+      }
     ],
     execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'bulk_approve_applications')) {
-        return resultBuilder.error('❌ You do not have permission for bulk approvals');
-      }
-      
-      const recordIds = await context.getRecordIds();
-      const note = context.formValues['Approval Note'];
-      
-      // Update all selected applications
-      await context.dataSource.getCollection('applications').update(
-        { conditionTree: { field: 'id', operator: 'In', value: recordIds } },
-        { status: 'approved', reviewer: userEmail }
-      );
-      
-      // Log audit for each
-      const auditLogs = recordIds.map(id => ({
-        actor: userEmail,
-        action: 'bulk_application_approved',
-        entity: 'application',
-        entity_id: id,
-        payload: { note, demo_mode: DEMO_MODE },
-        created_at: new Date()
-      }));
-      
-      await context.dataSource.getCollection('audit_log').create(auditLogs);
-      
-      return resultBuilder.success(`✅ ${recordIds.length} applications approved`);
+      const application = await context.getRecord(['id']);
+      const assignee = context.formValues['Assign To'];
+
+      await context.dataSource
+        .getCollection('applications')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: application.id }], {
+          reviewer: assignee
+        });
+
+      return resultBuilder.success(`✅ Application assigned to ${assignee}`);
     },
   });
 
-  // START REVIEW PROCESS
+  collection.addAction('📝 Add Review Note', {
+    scope: 'Single',
+    form: [
+      {
+        label: 'Note',
+        type: 'TextArea',
+        isRequired: true
+      }
+    ],
+    execute: async (context, resultBuilder) => {
+      const application = await context.getRecord(['id', 'notes']);
+      const newNote = context.formValues['Note'];
+      
+      const timestamp = new Date().toISOString();
+      const noteEntry = `[${timestamp}] ${context.caller.email}: ${newNote}`;
+      
+      const updatedNotes = application.notes 
+        ? `${application.notes}\n\n${noteEntry}` 
+        : noteEntry;
+
+      await context.dataSource
+        .getCollection('applications')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: application.id }], {
+          notes: updatedNotes
+        });
+
+      return resultBuilder.success('✅ Note added successfully');
+    },
+  });
+
   collection.addAction('🔍 Start Review', {
     scope: 'Single',
     execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      const recordId = await context.getRecordId();
-      const record = await context.getRecord(['status']);
-      
-      if (record.status !== 'submitted') {
-        return resultBuilder.error('Only submitted applications can be reviewed');
+      const application = await context.getRecord(['id', 'status']);
+
+      if (application.status !== 'submitted') {
+        return resultBuilder.error('❌ This application is not in submitted status');
       }
-      
-      // Update status to in_review
-      await context.dataSource.getCollection('applications').update(
-        { conditionTree: { field: 'id', operator: 'Equal', value: recordId } },
-        { 
+
+      await context.dataSource
+        .getCollection('applications')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: application.id }], {
           status: 'in_review',
-          reviewer: userEmail
-        }
-      );
-      
-      // Add note
-      await context.dataSource.getCollection('notes').create([{
-        id: require('crypto').randomUUID(),
-        entity_type: 'application',
-        entity_id: recordId,
-        author: userEmail,
-        body: `Review started by ${userEmail}`,
-        created_at: new Date()
-      }]);
-      
-      return resultBuilder.success('🔍 Review process started');
+          reviewer: context.caller.email
+        });
+
+      return resultBuilder.success('✅ Review started - application status updated to "in_review"');
     },
   });
 
-  console.log('✅ Applications collection enhanced with full onboarding workflow');
+  // Bulk Actions
+  collection.addAction('✅ Bulk Approve Applications', {
+    scope: 'Bulk',
+    execute: async (context, resultBuilder) => {
+      if (!hasPermission(context.caller.email, 'bulk_approve_applications')) {
+        return resultBuilder.error('❌ You do not have permission to bulk approve');
+      }
+
+      const recordIds = await context.getRecordIds();
+      
+      await context.dataSource
+        .getCollection('applications')
+        .update(context.caller, [{ field: 'id', operator: 'In', value: recordIds }], {
+          status: 'approved',
+          reviewer: context.caller.email
+        });
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
+        action: 'bulk_application_approved',
+        entity: 'application',
+        entity_id: null,
+        payload: { count: recordIds.length, application_ids: recordIds }
+      }]);
+
+      return resultBuilder.success(`✅ ${recordIds.length} applications approved successfully!`);
+    },
+  });
+
+  collection.addAction('👥 Bulk Assign Applications', {
+    scope: 'Bulk',
+    form: [
+      {
+        label: 'Assign To',
+        type: 'String',
+        isRequired: true
+      }
+    ],
+    execute: async (context, resultBuilder) => {
+      const recordIds = await context.getRecordIds();
+      const assignee = context.formValues['Assign To'];
+
+      await context.dataSource
+        .getCollection('applications')
+        .update(context.caller, [{ field: 'id', operator: 'In', value: recordIds }], {
+          reviewer: assignee
+        });
+
+      return resultBuilder.success(`✅ ${recordIds.length} applications assigned to ${assignee}`);
+    },
+  });
+
+  collection.addAction('📊 View Application Stats', {
+    scope: 'Global',
+    execute: async (context, resultBuilder) => {
+      const allApplications = await context.dataSource
+        .getCollection('applications')
+        .list(context.caller, { field: 'id', operator: 'Present' }, null);
+
+      const stats = {
+        total: allApplications.length,
+        submitted: 0,
+        in_review: 0,
+        approved: 0,
+        rejected: 0,
+        more_info: 0,
+        highRisk: 0,
+        sanctionsHits: 0
+      };
+
+      allApplications.forEach(app => {
+        stats[app.status] = (stats[app.status] || 0) + 1;
+        if (app.risk_score >= 60) stats.highRisk++;
+        if (app.sanctions_hits > 0) stats.sanctionsHits++;
+      });
+
+      const message = `
+📊 APPLICATION STATISTICS
+━━━━━━━━━━━━━━━━━━━━━━
+
+📈 Total Applications: ${stats.total}
+
+📝 By Status:
+• Submitted: ${stats.submitted || 0}
+• In Review: ${stats.in_review || 0}
+• Approved: ${stats.approved || 0}
+• Rejected: ${stats.rejected || 0}
+• More Info Needed: ${stats.more_info || 0}
+
+🎯 Risk Analysis:
+• High Risk (>60): ${stats.highRisk}
+• Sanctions Hits: ${stats.sanctionsHits}
+
+📊 Approval Rate: ${stats.total > 0 ? ((stats.approved / stats.total) * 100).toFixed(1) : 0}%
+      `;
+
+      return resultBuilder.success(message);
+    },
+  });
+
+  console.log('✅ Applications collection customized');
 });
 
 // ========================================
-// ALERTS COLLECTION (AML MONITORING)
+// ALERTS COLLECTION - AML MONITORING
 // ========================================
 
 agent.customizeCollection('alerts', collection => {
   
-  // ========================================
-  // SMART FIELDS FOR AML
-  // ========================================
+  // ====== SMART FIELDS ======
   
   collection.addField('severityBadge', {
     columnType: 'String',
     dependencies: ['severity'],
     getValues: (records) => records.map((r) => {
       const badges = {
-        critical: '🔴 Critical',
-        high: '🟠 High',
+        low: '🟢 Low',
         medium: '🟡 Medium',
-        low: '🔵 Low'
+        high: '🟠 High',
+        critical: '🔴 Critical'
       };
       return badges[r.severity] || '⚪ Unknown';
     }),
@@ -667,15 +742,7 @@ agent.customizeCollection('alerts', collection => {
   collection.addField('statusBadge', {
     columnType: 'String',
     dependencies: ['status'],
-    getValues: (records) => records.map((r) => {
-      const badges = {
-        open: '🆕 Open',
-        triaged: '🔍 Triaged',
-        escalated: '🚨 Escalated',
-        dismissed: '✅ Dismissed'
-      };
-      return badges[r.status] || '❓ Unknown';
-    }),
+    getValues: (records) => records.map((r) => `${getStatusIcon(r.status)} ${r.status?.toUpperCase() || 'UNKNOWN'}`),
   });
 
   collection.addField('alertAge', {
@@ -684,333 +751,343 @@ agent.customizeCollection('alerts', collection => {
     getValues: (records) => records.map((r) => getTimeSince(r.triggered_at)),
   });
 
-  collection.addField('alertTypeBadge', {
+  collection.addField('typeBadge', {
     columnType: 'String',
     dependencies: ['type'],
     getValues: (records) => records.map((r) => {
       const badges = {
-        'transaction': '💳 Transaction',
-        'behavior': '📊 Behavior',
-        'threshold': '📈 Threshold',
-        'pattern': '🔍 Pattern',
-        'sanctions': '🚫 Sanctions',
-        'pep': '👤 PEP'
+        'suspicious_transaction': '💸 Suspicious Transaction',
+        'velocity_check': '⚡ Velocity Check',
+        'unusual_activity': '⚠️ Unusual Activity',
+        'sanctions_match': '🚨 Sanctions Match',
+        'pep_match': '🎯 PEP Match',
+        'fraud_indicator': '🔴 Fraud Indicator'
       };
       return badges[r.type] || `📌 ${r.type || 'Alert'}`;
     }),
   });
 
-  collection.addField('riskIndicators', {
-    columnType: 'String',
-    dependencies: ['details'],
+  collection.addField('riskLevel', {
+    columnType: 'Number',
+    dependencies: ['severity'],
     getValues: (records) => records.map((r) => {
-      try {
-        const details = typeof r.details === 'string' ? JSON.parse(r.details) : r.details;
-        const indicators = [];
-        
-        if (details?.amount_cents > 1000000) indicators.push('💰 Large Amount');
-        if (details?.velocity_spike) indicators.push('📈 Velocity Spike');
-        if (details?.new_counterparty) indicators.push('🆕 New Counterparty');
-        if (details?.high_risk_country) indicators.push('🌍 High Risk Country');
-        if (details?.pattern_match) indicators.push('🔍 Pattern Match');
-        
-        return indicators.join(' | ') || '📊 Standard';
-      } catch {
-        return '📊 Standard';
-      }
+      const levels = { low: 25, medium: 50, high: 75, critical: 100 };
+      return levels[r.severity] || 0;
     }),
   });
 
-  // ========================================
-  // AML WORKSPACES (SEGMENTS)
-  // ========================================
+  // ====== WORKSPACES / SEGMENTS ======
   
-  // COMPLIANCE INBOX - Priority alerts
-  collection.addSegment('📥 AML Inbox', async () => {
-    return {
-      aggregator: 'Or',
-      conditions: [
-        { field: 'status', operator: 'Equal', value: 'open' },
-        { field: 'severity', operator: 'In', value: ['critical', 'high'] }
-      ]
-    };
-  });
-
-  collection.addSegment('🆕 Open Alerts', async () => ({
+  collection.addSegment('📥 Inbox: New Alerts', async () => ({
     field: 'status',
     operator: 'Equal',
     value: 'open'
   }));
 
-  collection.addSegment('🔍 Triaged', async () => ({
-    field: 'status',
-    operator: 'Equal',
-    value: 'triaged'
-  }));
-
-  collection.addSegment('🚨 Escalated', async () => ({
-    field: 'status',
-    operator: 'Equal',
-    value: 'escalated'
-  }));
-
-  collection.addSegment('🔴 Critical Severity', async () => ({
+  collection.addSegment('🔴 Critical Alerts', async () => ({
     field: 'severity',
     operator: 'Equal',
     value: 'critical'
   }));
 
-  collection.addSegment('🟠 High Risk Alerts', async () => ({
+  collection.addSegment('🟠 High Priority', async () => ({
     field: 'severity',
-    operator: 'In',
-    value: ['critical', 'high']
+    operator: 'Equal',
+    value: 'high'
   }));
 
-  collection.addSegment('📅 Today\'s Alerts', async () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  collection.addSegment('🔍 Triaged Alerts', async () => ({
+    field: 'status',
+    operator: 'Equal',
+    value: 'triaged'
+  }));
+
+  collection.addSegment('⚠️ Escalated Cases', async () => ({
+    field: 'status',
+    operator: 'Equal',
+    value: 'escalated'
+  }));
+
+  collection.addSegment('✖️ Dismissed Alerts', async () => ({
+    field: 'status',
+    operator: 'Equal',
+    value: 'dismissed'
+  }));
+
+  collection.addSegment('⏰ Last 24 Hours', async () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
     
     return {
       field: 'triggered_at',
       operator: 'GreaterThan',
-      value: today.toISOString()
+      value: yesterday.toISOString()
     };
   });
 
-  // ========================================
-  // AML SMART ACTIONS
-  // ========================================
+  collection.addSegment('🚨 Requires Immediate Action', async () => {
+    const today = new Date();
+    today.setHours(today.getHours() - 2);
+    
+    return {
+      aggregator: 'And',
+      conditions: [
+        { field: 'severity', operator: 'In', value: ['critical', 'high'] },
+        { field: 'status', operator: 'Equal', value: 'open' },
+        { field: 'triggered_at', operator: 'LessThan', value: today.toISOString() }
+      ]
+    };
+  });
 
-  // TRIAGE ALERT
-  collection.addAction('🔍 Triage Alert', {
+  collection.addSegment('💸 Transaction Alerts', async () => ({
+    field: 'type',
+    operator: 'In',
+    value: ['suspicious_transaction', 'velocity_check', 'unusual_activity']
+  }));
+
+  collection.addSegment('🎯 Compliance Alerts', async () => ({
+    field: 'type',
+    operator: 'In',
+    value: ['sanctions_match', 'pep_match']
+  }));
+
+  // ====== SMART ACTIONS ======
+  
+  collection.addAction('🔍 Investigate Alert', {
     scope: 'Single',
     form: [
       {
-        label: 'Triage Assessment',
-        type: 'Enum',
-        enumValues: ['Investigate Further', 'Monitor', 'Dismiss', 'Escalate'],
-        isRequired: true,
-      },
-      {
-        label: 'Initial Findings',
-        type: 'String',
-        widget: 'TextArea',
-      },
+        label: 'Investigation Notes',
+        type: 'TextArea',
+        isRequired: true
+      }
     ],
     execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'investigate_alert')) {
-        return resultBuilder.error('❌ You do not have permission to triage alerts');
+      if (!hasPermission(context.caller.email, 'investigate_alert')) {
+        return resultBuilder.error('❌ You do not have permission to investigate alerts');
       }
-      
-      const recordId = await context.getRecordId();
-      const assessment = context.formValues['Triage Assessment'];
-      const findings = context.formValues['Initial Findings'];
-      
-      let newStatus = 'triaged';
-      if (assessment === 'Dismiss') newStatus = 'dismissed';
-      if (assessment === 'Escalate') newStatus = 'escalated';
-      
-      // Update alert
-      await context.dataSource.getCollection('alerts').update(
-        { conditionTree: { field: 'id', operator: 'Equal', value: recordId } },
-        { status: newStatus }
-      );
-      
-      // Add note
-      await context.dataSource.getCollection('notes').create([{
-        id: require('crypto').randomUUID(),
+
+      const alert = await context.getRecord(['id', 'customer_id', 'type', 'severity']);
+      const notes = context.formValues['Investigation Notes'];
+
+      await context.dataSource
+        .getCollection('alerts')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: alert.id }], {
+          status: 'triaged',
+          details: { ...alert.details, investigation_notes: notes, investigator: context.caller.email }
+        });
+
+      // Create note
+      await context.dataSource.getCollection('notes').create(context.caller, [{
         entity_type: 'alert',
-        entity_id: recordId,
-        author: userEmail,
-        body: `Alert triaged: ${assessment}. ${findings || ''}`,
-        created_at: new Date()
+        entity_id: alert.id,
+        author: context.caller.email,
+        body: notes
       }]);
-      
-      // Log audit
-      await context.dataSource.getCollection('audit_log').create([{
-        actor: userEmail,
-        action: 'alert_triaged',
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
+        action: 'alert_investigated',
         entity: 'alert',
-        entity_id: recordId,
-        payload: { assessment, findings, demo_mode: DEMO_MODE },
-        created_at: new Date()
+        entity_id: alert.id,
+        payload: { type: alert.type, severity: alert.severity, customer_id: alert.customer_id }
       }]);
-      
-      return resultBuilder.success(`🔍 Alert triaged - ${assessment}`);
+
+      return resultBuilder.success('🔍 Alert investigated and marked as triaged');
     },
   });
 
-  // ESCALATE ALERT
-  collection.addAction('🚨 Escalate Alert', {
+  collection.addAction('⚠️ Escalate to Case', {
     scope: 'Single',
     form: [
-      {
-        label: 'Case Priority',
-        type: 'Enum',
-        enumValues: ['p1', 'p2', 'p3'],
-        isRequired: true,
-      },
       {
         label: 'Case Title',
         type: 'String',
-        isRequired: true,
+        isRequired: true
       },
       {
-        label: 'Escalation Reason',
-        type: 'String',
-        widget: 'TextArea',
-        isRequired: true,
+        label: 'Priority',
+        type: 'Enum',
+        enumValues: ['p3', 'p2', 'p1'],
+        isRequired: true
       },
+      {
+        label: 'Escalation Notes',
+        type: 'TextArea',
+        isRequired: true
+      }
     ],
     execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'escalate_alert')) {
+      if (!hasPermission(context.caller.email, 'escalate_alert')) {
         return resultBuilder.error('❌ You do not have permission to escalate alerts');
       }
-      
-      const recordId = await context.getRecordId();
-      const priority = context.formValues['Case Priority'];
+
+      const alert = await context.getRecord(['id', 'customer_id', 'type', 'severity']);
       const title = context.formValues['Case Title'];
-      const reason = context.formValues['Escalation Reason'];
-      const alert = await context.getRecord(['customer_id', 'type']);
-      
+      const priority = context.formValues['Priority'];
+      const notes = context.formValues['Escalation Notes'];
+
       // Create case
-      const caseId = require('crypto').randomUUID();
-      await context.dataSource.getCollection('cases').create([{
-        id: caseId,
-        title: title,
+      const caseRecords = await context.dataSource.getCollection('cases').create(context.caller, [{
+        title,
         status: 'open',
-        priority: priority,
-        owner: userEmail,
-        created_at: new Date()
+        owner: context.caller.email,
+        priority
       }]);
-      
+
+      const caseId = caseRecords[0].id;
+
       // Link alert to case
-      await context.dataSource.getCollection('case_links').create([{
+      await context.dataSource.getCollection('case_links').create(context.caller, [{
         case_id: caseId,
-        alert_id: recordId
+        alert_id: alert.id
       }]);
-      
-      // Update alert
-      await context.dataSource.getCollection('alerts').update(
-        { conditionTree: { field: 'id', operator: 'Equal', value: recordId } },
-        { status: 'escalated' }
-      );
-      
-      // Log audit
-      await context.dataSource.getCollection('audit_log').create([{
-        actor: userEmail,
+
+      // Update alert status
+      await context.dataSource
+        .getCollection('alerts')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: alert.id }], {
+          status: 'escalated'
+        });
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
         action: 'alert_escalated',
         entity: 'alert',
-        entity_id: recordId,
-        payload: { case_id: caseId, priority, title, reason, demo_mode: DEMO_MODE },
-        created_at: new Date()
+        entity_id: alert.id,
+        payload: { case_id: caseId, priority, notes }
       }]);
-      
-      return resultBuilder.success(`🚨 Alert escalated to case: ${title}`);
+
+      return resultBuilder.success(`⚠️ Alert escalated to case: ${title} (${priority.toUpperCase()})`);
     },
   });
 
-  // DISMISS ALERT
-  collection.addAction('✅ Dismiss Alert', {
+  collection.addAction('✖️ Dismiss Alert', {
     scope: 'Single',
     form: [
       {
         label: 'Dismissal Reason',
-        type: 'Enum',
-        enumValues: ['False Positive', 'Known Pattern', 'Legitimate Activity', 'Duplicate', 'Other'],
-        isRequired: true,
-      },
-      {
-        label: 'Additional Notes',
-        type: 'String',
-        widget: 'TextArea',
-      },
+        type: 'TextArea',
+        isRequired: true
+      }
     ],
     execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'dismiss_alert')) {
+      if (!hasPermission(context.caller.email, 'dismiss_alert')) {
         return resultBuilder.error('❌ You do not have permission to dismiss alerts');
       }
-      
-      const recordId = await context.getRecordId();
+
+      const alert = await context.getRecord(['id', 'type', 'severity']);
       const reason = context.formValues['Dismissal Reason'];
-      const notes = context.formValues['Additional Notes'];
-      
-      // Update alert
-      await context.dataSource.getCollection('alerts').update(
-        { conditionTree: { field: 'id', operator: 'Equal', value: recordId } },
-        { status: 'dismissed' }
-      );
-      
-      // Add note
-      await context.dataSource.getCollection('notes').create([{
-        id: require('crypto').randomUUID(),
-        entity_type: 'alert',
-        entity_id: recordId,
-        author: userEmail,
-        body: `Alert dismissed: ${reason}. ${notes || ''}`,
-        created_at: new Date()
-      }]);
-      
-      // Log audit
-      await context.dataSource.getCollection('audit_log').create([{
-        actor: userEmail,
+
+      await context.dataSource
+        .getCollection('alerts')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: alert.id }], {
+          status: 'dismissed',
+          details: { ...alert.details, dismissal_reason: reason, dismissed_by: context.caller.email }
+        });
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
         action: 'alert_dismissed',
         entity: 'alert',
-        entity_id: recordId,
-        payload: { reason, notes, demo_mode: DEMO_MODE },
-        created_at: new Date()
+        entity_id: alert.id,
+        payload: { type: alert.type, severity: alert.severity, reason }
       }]);
-      
-      return resultBuilder.success(`✅ Alert dismissed as ${reason}`);
+
+      return resultBuilder.success('✖️ Alert dismissed');
     },
   });
 
-  // BULK DISMISS ALERTS
-  collection.addAction('✅ Bulk Dismiss Alerts', {
+  collection.addAction('✖️ Bulk Dismiss Alerts', {
     scope: 'Bulk',
     form: [
       {
         label: 'Dismissal Reason',
-        type: 'Enum',
-        enumValues: ['False Positive', 'Known Pattern', 'Legitimate Activity'],
-        isRequired: true,
-      },
+        type: 'TextArea',
+        isRequired: true
+      }
     ],
     execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'bulk_dismiss_alerts')) {
-        return resultBuilder.error('❌ You do not have permission for bulk dismissals');
+      if (!hasPermission(context.caller.email, 'bulk_dismiss_alerts')) {
+        return resultBuilder.error('❌ You do not have permission to bulk dismiss alerts');
       }
-      
+
       const recordIds = await context.getRecordIds();
       const reason = context.formValues['Dismissal Reason'];
-      
-      // Update all selected alerts
-      await context.dataSource.getCollection('alerts').update(
-        { conditionTree: { field: 'id', operator: 'In', value: recordIds } },
-        { status: 'dismissed' }
-      );
-      
-      // Log audit for each
-      const auditLogs = recordIds.map(id => ({
-        actor: userEmail,
-        action: 'bulk_alert_dismissed',
+
+      await context.dataSource
+        .getCollection('alerts')
+        .update(context.caller, [{ field: 'id', operator: 'In', value: recordIds }], {
+          status: 'dismissed'
+        });
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
+        action: 'bulk_alerts_dismissed',
         entity: 'alert',
-        entity_id: id,
-        payload: { reason, demo_mode: DEMO_MODE },
-        created_at: new Date()
-      }));
-      
-      await context.dataSource.getCollection('audit_log').create(auditLogs);
-      
-      return resultBuilder.success(`✅ ${recordIds.length} alerts dismissed`);
+        entity_id: null,
+        payload: { count: recordIds.length, alert_ids: recordIds, reason }
+      }]);
+
+      return resultBuilder.success(`✖️ ${recordIds.length} alerts dismissed`);
     },
   });
 
-  console.log('✅ Alerts collection enhanced with AML monitoring features');
+  collection.addAction('📊 Alert Dashboard', {
+    scope: 'Global',
+    execute: async (context, resultBuilder) => {
+      const allAlerts = await context.dataSource
+        .getCollection('alerts')
+        .list(context.caller, { field: 'id', operator: 'Present' }, null);
+
+      const stats = {
+        total: allAlerts.length,
+        open: 0,
+        triaged: 0,
+        escalated: 0,
+        dismissed: 0,
+        critical: 0,
+        high: 0,
+        medium: 0,
+        low: 0
+      };
+
+      allAlerts.forEach(alert => {
+        stats[alert.status] = (stats[alert.status] || 0) + 1;
+        stats[alert.severity] = (stats[alert.severity] || 0) + 1;
+      });
+
+      const message = `
+📊 ALERT MONITORING DASHBOARD
+━━━━━━━━━━━━━━━━━━━━━━
+
+🚨 Total Alerts: ${stats.total}
+
+📈 By Status:
+• Open: ${stats.open || 0}
+• Triaged: ${stats.triaged || 0}
+• Escalated: ${stats.escalated || 0}
+• Dismissed: ${stats.dismissed || 0}
+
+🎯 By Severity:
+• 🔴 Critical: ${stats.critical || 0}
+• 🟠 High: ${stats.high || 0}
+• 🟡 Medium: ${stats.medium || 0}
+• 🟢 Low: ${stats.low || 0}
+
+⚠️ Action Required: ${stats.open || 0} open alerts
+📊 Resolution Rate: ${stats.total > 0 ? (((stats.dismissed + stats.escalated) / stats.total) * 100).toFixed(1) : 0}%
+      `;
+
+      return resultBuilder.success(message);
+    },
+  });
+
+  console.log('✅ Alerts collection customized');
 });
 
 // ========================================
@@ -1022,62 +1099,52 @@ agent.customizeCollection('aml_alerts', collection => {
   collection.addField('statusBadge', {
     columnType: 'String',
     dependencies: ['status'],
-    getValues: (records) => records.map((r) => {
-      const badges = {
-        open: '🆕 Open',
-        triaged: '🔍 Triaged',
-        closed: '✅ Closed'
-      };
-      return badges[r.status] || '❓ Unknown';
-    }),
+    getValues: (records) => records.map((r) => `${getStatusIcon(r.status)} ${r.status?.toUpperCase() || 'UNKNOWN'}`),
   });
 
   collection.addField('scoreBadge', {
     columnType: 'String',
     dependencies: ['score'],
-    getValues: (records) => records.map((r) => getRiskScoreBadge(r.score)),
+    getValues: (records) => records.map((r) => getRiskBadge(r.score || 0)),
   });
 
   collection.addField('ruleBadge', {
     columnType: 'String',
     dependencies: ['rule'],
-    getValues: (records) => records.map((r) => {
-      const badges = {
-        'high_velocity': '📈 High Velocity',
-        'large_transaction': '💰 Large Transaction',
-        'unusual_pattern': '🔍 Unusual Pattern',
-        'sanctions_match': '🚫 Sanctions Match',
-        'pep_match': '👤 PEP Match'
-      };
-      return badges[r.rule] || `📌 ${r.rule || 'Rule'}`;
-    }),
+    getValues: (records) => records.map((r) => `🎯 ${r.rule || 'Unknown Rule'}`),
   });
 
-  collection.addField('alertAge', {
+  collection.addField('ageInSystem', {
     columnType: 'String',
     dependencies: ['created_at'],
     getValues: (records) => records.map((r) => getTimeSince(r.created_at)),
   });
 
-  // Workspaces
-  collection.addSegment('🆕 Open AML Alerts', async () => ({
+  // Segments
+  collection.addSegment('📥 Open AML Alerts', async () => ({
     field: 'status',
     operator: 'Equal',
     value: 'open'
   }));
 
-  collection.addSegment('🔴 High Score (>70)', async () => ({
-    field: 'score',
-    operator: 'GreaterThan',
-    value: 70
+  collection.addSegment('🔍 Triaged', async () => ({
+    field: 'status',
+    operator: 'Equal',
+    value: 'triaged'
   }));
 
-  collection.addSegment('🚨 Escalated Cases', async () => ({
+  collection.addSegment('🔴 High Risk (>80)', async () => ({
+    field: 'score',
+    operator: 'GreaterThan',
+    value: 80
+  }));
+
+  collection.addSegment('⚠️ Escalated', async () => ({
     field: 'escalated_case_id',
     operator: 'Present'
   }));
 
-  console.log('✅ AML alerts collection enhanced');
+  console.log('✅ AML alerts collection customized');
 });
 
 // ========================================
@@ -1089,14 +1156,7 @@ agent.customizeCollection('cases', collection => {
   collection.addField('statusBadge', {
     columnType: 'String',
     dependencies: ['status'],
-    getValues: (records) => records.map((r) => {
-      const badges = {
-        open: '📂 Open',
-        in_review: '🔍 In Review',
-        closed: '✅ Closed'
-      };
-      return badges[r.status] || '❓ Unknown';
-    }),
+    getValues: (records) => records.map((r) => `${getStatusIcon(r.status)} ${r.status?.toUpperCase() || 'UNKNOWN'}`),
   });
 
   collection.addField('priorityBadge', {
@@ -1112,26 +1172,23 @@ agent.customizeCollection('cases', collection => {
     }),
   });
 
+  collection.addField('ownerBadge', {
+    columnType: 'String',
+    dependencies: ['owner'],
+    getValues: (records) => records.map((r) => r.owner ? `👤 ${r.owner}` : '⚪ Unassigned'),
+  });
+
   collection.addField('caseAge', {
     columnType: 'String',
     dependencies: ['created_at'],
     getValues: (records) => records.map((r) => getTimeSince(r.created_at)),
   });
 
-  collection.addField('ownerBadge', {
-    columnType: 'String',
-    dependencies: ['owner'],
-    getValues: (records) => records.map((r) => {
-      if (!r.owner) return '⚠️ Unassigned';
-      return `👤 ${r.owner}`;
-    }),
-  });
-
-  // Workspaces for cases
-  collection.addSegment('📂 Open Cases', async () => ({
+  // Segments
+  collection.addSegment('📥 Open Cases', async () => ({
     field: 'status',
-    operator: 'In',
-    value: ['open', 'in_review']
+    operator: 'Equal',
+    value: 'open'
   }));
 
   collection.addSegment('🔴 P1 Priority', async () => ({
@@ -1140,307 +1197,108 @@ agent.customizeCollection('cases', collection => {
     value: 'p1'
   }));
 
-  collection.addSegment('📊 My Cases', async (context) => ({
+  collection.addSegment('👤 My Cases', async (context) => ({
     field: 'owner',
     operator: 'Equal',
     value: context.caller.email
   }));
 
-  collection.addSegment('⚠️ Unassigned', async () => ({
+  collection.addSegment('⚪ Unassigned Cases', async () => ({
     field: 'owner',
-    operator: 'Missing'
+    operator: 'Blank'
   }));
 
-  // Case actions
-  collection.addAction('📝 Update Case', {
+  collection.addSegment('👀 In Review', async () => ({
+    field: 'status',
+    operator: 'Equal',
+    value: 'in_review'
+  }));
+
+  // Actions
+  collection.addAction('✅ Close Case', {
     scope: 'Single',
     form: [
       {
-        label: 'Status',
-        type: 'Enum',
-        enumValues: ['open', 'in_review', 'closed'],
-        isRequired: true,
-      },
+        label: 'Resolution Summary',
+        type: 'TextArea',
+        isRequired: true
+      }
+    ],
+    execute: async (context, resultBuilder) => {
+      if (!hasPermission(context.caller.email, 'close_case')) {
+        return resultBuilder.error('❌ You do not have permission to close cases');
+      }
+
+      const caseRecord = await context.getRecord(['id', 'title']);
+      const summary = context.formValues['Resolution Summary'];
+
+      await context.dataSource
+        .getCollection('cases')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: caseRecord.id }], {
+          status: 'closed'
+        });
+
+      // Create note
+      await context.dataSource.getCollection('notes').create(context.caller, [{
+        entity_type: 'case',
+        entity_id: caseRecord.id,
+        author: context.caller.email,
+        body: `Case closed: ${summary}`
+      }]);
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
+        action: 'case_closed',
+        entity: 'case',
+        entity_id: caseRecord.id,
+        payload: { title: caseRecord.title, summary }
+      }]);
+
+      return resultBuilder.success('✅ Case closed successfully');
+    },
+  });
+
+  collection.addAction('👤 Assign to Me', {
+    scope: 'Single',
+    execute: async (context, resultBuilder) => {
+      const caseRecord = await context.getRecord(['id']);
+
+      await context.dataSource
+        .getCollection('cases')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: caseRecord.id }], {
+          owner: context.caller.email
+        });
+
+      return resultBuilder.success(`✅ Case assigned to ${context.caller.email}`);
+    },
+  });
+
+  collection.addAction('🔄 Change Priority', {
+    scope: 'Single',
+    form: [
       {
-        label: 'Priority',
+        label: 'New Priority',
         type: 'Enum',
         enumValues: ['p1', 'p2', 'p3'],
-        isRequired: true,
-      },
-      {
-        label: 'Update Note',
-        type: 'String',
-        widget: 'TextArea',
-        isRequired: true,
-      },
+        isRequired: true
+      }
     ],
     execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'update_case')) {
-        return resultBuilder.error('❌ You do not have permission to update cases');
-      }
-      
-      const recordId = await context.getRecordId();
-      const status = context.formValues['Status'];
-      const priority = context.formValues['Priority'];
-      const note = context.formValues['Update Note'];
-      
-      // Update case
-      await context.dataSource.getCollection('cases').update(
-        { conditionTree: { field: 'id', operator: 'Equal', value: recordId } },
-        { status, priority }
-      );
-      
-      // Add note
-      await context.dataSource.getCollection('notes').create([{
-        id: require('crypto').randomUUID(),
-        entity_type: 'case',
-        entity_id: recordId,
-        author: userEmail,
-        body: `Case updated - Status: ${status}, Priority: ${priority}. ${note}`,
-        created_at: new Date()
-      }]);
-      
-      return resultBuilder.success(`📝 Case updated`);
+      const caseRecord = await context.getRecord(['id']);
+      const priority = context.formValues['New Priority'];
+
+      await context.dataSource
+        .getCollection('cases')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: caseRecord.id }], {
+          priority
+        });
+
+      return resultBuilder.success(`✅ Case priority changed to ${priority.toUpperCase()}`);
     },
   });
 
-  collection.addAction('👤 Assign Case', {
-    scope: 'Single',
-    form: [
-      {
-        label: 'Assign To',
-        type: 'String',
-        isRequired: true,
-        description: 'Enter email address of the assignee',
-      },
-    ],
-    execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'update_case')) {
-        return resultBuilder.error('❌ You do not have permission to assign cases');
-      }
-      
-      const recordId = await context.getRecordId();
-      const assignTo = context.formValues['Assign To'];
-      
-      // Update case
-      await context.dataSource.getCollection('cases').update(
-        { conditionTree: { field: 'id', operator: 'Equal', value: recordId } },
-        { owner: assignTo }
-      );
-      
-      // Add note
-      await context.dataSource.getCollection('notes').create([{
-        id: require('crypto').randomUUID(),
-        entity_type: 'case',
-        entity_id: recordId,
-        author: userEmail,
-        body: `Case assigned to ${assignTo}`,
-        created_at: new Date()
-      }]);
-      
-      return resultBuilder.success(`👤 Case assigned to ${assignTo}`);
-    },
-  });
-
-  console.log('✅ Cases collection enhanced');
-});
-
-// ========================================
-// ACCOUNTS COLLECTION
-// ========================================
-
-agent.customizeCollection('accounts', collection => {
-  
-  collection.addField('statusBadge', {
-    columnType: 'String',
-    dependencies: ['status'],
-    getValues: (records) => records.map((r) => {
-      const badges = {
-        active: '✅ Active',
-        frozen: '🔒 Frozen',
-        closed: '⛔ Closed'
-      };
-      return badges[r.status] || '❓ Unknown';
-    }),
-  });
-
-  collection.addField('balanceFormatted', {
-    columnType: 'String',
-    dependencies: ['balance_cents', 'currency'],
-    getValues: (records) => records.map((r) => formatCurrency(r.balance_cents || 0, r.currency || 'EUR')),
-  });
-
-  collection.addField('currencyBadge', {
-    columnType: 'String',
-    dependencies: ['currency'],
-    getValues: (records) => records.map((r) => {
-      const badges = {
-        'EUR': '💶 EUR',
-        'USD': '💵 USD',
-        'GBP': '💷 GBP'
-      };
-      return badges[r.currency] || `💰 ${r.currency || 'EUR'}`;
-    }),
-  });
-
-  // Account workspaces
-  collection.addSegment('✅ Active Accounts', async () => ({
-    field: 'status',
-    operator: 'Equal',
-    value: 'active'
-  }));
-
-  collection.addSegment('🔒 Frozen Accounts', async () => ({
-    field: 'status',
-    operator: 'Equal',
-    value: 'frozen'
-  }));
-
-  collection.addSegment('💰 High Balance (>10k)', async () => ({
-    field: 'balance_cents',
-    operator: 'GreaterThan',
-    value: 1000000
-  }));
-
-  // Account management actions
-  collection.addAction('🔒 Freeze Account', {
-    scope: 'Single',
-    form: [
-      {
-        label: 'Freeze Reason',
-        type: 'Enum',
-        enumValues: ['AML Investigation', 'Fraud Suspicion', 'Court Order', 'Customer Request', 'Other'],
-        isRequired: true,
-      },
-      {
-        label: 'Additional Notes',
-        type: 'String',
-        widget: 'TextArea',
-      },
-    ],
-    execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'freeze_account')) {
-        return resultBuilder.error('❌ You do not have permission to freeze accounts');
-      }
-      
-      const recordId = await context.getRecordId();
-      const reason = context.formValues['Freeze Reason'];
-      const notes = context.formValues['Additional Notes'];
-      
-      // Update account
-      await context.dataSource.getCollection('accounts').update(
-        { conditionTree: { field: 'id', operator: 'Equal', value: recordId } },
-        { status: 'frozen' }
-      );
-      
-      // Add note
-      await context.dataSource.getCollection('notes').create([{
-        id: require('crypto').randomUUID(),
-        entity_type: 'account',
-        entity_id: recordId,
-        author: userEmail,
-        body: `Account frozen. Reason: ${reason}. ${notes || ''}`,
-        created_at: new Date()
-      }]);
-      
-      // Log audit
-      await context.dataSource.getCollection('audit_log').create([{
-        actor: userEmail,
-        action: 'account_frozen',
-        entity: 'account',
-        entity_id: recordId,
-        payload: { reason, notes, demo_mode: DEMO_MODE },
-        created_at: new Date()
-      }]);
-      
-      return resultBuilder.success(`🔒 Account frozen - ${reason}`);
-    },
-  });
-
-  collection.addAction('🔓 Unfreeze Account', {
-    scope: 'Single',
-    form: [
-      {
-        label: 'Unfreeze Reason',
-        type: 'String',
-        widget: 'TextArea',
-        isRequired: true,
-      },
-    ],
-    execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'unfreeze_account')) {
-        return resultBuilder.error('❌ You do not have permission to unfreeze accounts');
-      }
-      
-      const recordId = await context.getRecordId();
-      const reason = context.formValues['Unfreeze Reason'];
-      
-      // Update account
-      await context.dataSource.getCollection('accounts').update(
-        { conditionTree: { field: 'id', operator: 'Equal', value: recordId } },
-        { status: 'active' }
-      );
-      
-      // Log audit
-      await context.dataSource.getCollection('audit_log').create([{
-        actor: userEmail,
-        action: 'account_unfrozen',
-        entity: 'account',
-        entity_id: recordId,
-        payload: { reason, demo_mode: DEMO_MODE },
-        created_at: new Date()
-      }]);
-      
-      return resultBuilder.success('🔓 Account unfrozen');
-    },
-  });
-
-  collection.addAction('🔒 Bulk Freeze Accounts', {
-    scope: 'Bulk',
-    form: [
-      {
-        label: 'Freeze Reason',
-        type: 'Enum',
-        enumValues: ['AML Investigation', 'Batch Risk Review', 'Regulatory Request'],
-        isRequired: true,
-      },
-    ],
-    execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'bulk_freeze_accounts')) {
-        return resultBuilder.error('❌ You do not have permission for bulk freeze operations');
-      }
-      
-      const recordIds = await context.getRecordIds();
-      const reason = context.formValues['Freeze Reason'];
-      
-      // Update all accounts
-      await context.dataSource.getCollection('accounts').update(
-        { conditionTree: { field: 'id', operator: 'In', value: recordIds } },
-        { status: 'frozen' }
-      );
-      
-      // Log audit for each
-      const auditLogs = recordIds.map(id => ({
-        actor: userEmail,
-        action: 'bulk_account_frozen',
-        entity: 'account',
-        entity_id: id,
-        payload: { reason, demo_mode: DEMO_MODE },
-        created_at: new Date()
-      }));
-      
-      await context.dataSource.getCollection('audit_log').create(auditLogs);
-      
-      return resultBuilder.success(`🔒 ${recordIds.length} accounts frozen`);
-    },
-  });
-
-  console.log('✅ Accounts collection enhanced');
+  console.log('✅ Cases collection customized');
 });
 
 // ========================================
@@ -1453,32 +1311,41 @@ agent.customizeCollection('customers', collection => {
     columnType: 'String',
     dependencies: ['type'],
     getValues: (records) => records.map((r) => {
-      return r.type === 'business' ? '🏢 Business' : '👤 Individual';
+      const badges = {
+        individual: '👤 Individual',
+        business: '🏢 Business'
+      };
+      return badges[r.type] || '⚪ Unknown';
     }),
   });
 
   collection.addField('fullName', {
     columnType: 'String',
-    dependencies: ['first_name', 'last_name', 'business_name'],
+    dependencies: ['first_name', 'last_name', 'business_name', 'type'],
     getValues: (records) => records.map((r) => {
-      if (r.business_name) return r.business_name;
-      return `${r.first_name || ''} ${r.last_name || ''}`.trim() || 'Unknown';
+      if (r.type === 'business') return r.business_name || 'Unnamed Business';
+      return `${r.first_name || ''} ${r.last_name || ''}`.trim() || 'Unnamed Customer';
     }),
   });
 
-  collection.addField('customerSince', {
+  collection.addField('memberSince', {
     columnType: 'String',
     dependencies: ['created_at'],
+    getValues: (records) => records.map((r) => getTimeSince(r.created_at)),
+  });
+
+  collection.addField('contactInfo', {
+    columnType: 'String',
+    dependencies: ['email', 'phone'],
     getValues: (records) => records.map((r) => {
-      if (!r.created_at) return 'Unknown';
-      const months = Math.floor((new Date() - new Date(r.created_at)) / (1000 * 60 * 60 * 24 * 30));
-      if (months < 1) return '🆕 New Customer';
-      if (months < 12) return `📅 ${months} months`;
-      return `🏆 ${Math.floor(months / 12)} years`;
+      const parts = [];
+      if (r.email) parts.push(`📧 ${r.email}`);
+      if (r.phone) parts.push(`📱 ${r.phone}`);
+      return parts.join(' | ') || 'No contact info';
     }),
   });
 
-  // Customer workspaces
+  // Segments
   collection.addSegment('👤 Individual Customers', async () => ({
     field: 'type',
     operator: 'Equal',
@@ -1491,7 +1358,7 @@ agent.customizeCollection('customers', collection => {
     value: 'business'
   }));
 
-  collection.addSegment('🆕 New Customers (30 days)', async () => {
+  collection.addSegment('📅 New Customers (30d)', async () => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     
@@ -1502,61 +1369,303 @@ agent.customizeCollection('customers', collection => {
     };
   });
 
-  console.log('✅ Customers collection enhanced');
-});
-
-// ========================================
-// DOCUMENTS COLLECTION
-// ========================================
-
-agent.customizeCollection('documents', collection => {
-  
-  collection.addField('typeBadge', {
-    columnType: 'String',
-    dependencies: ['type'],
-    getValues: (records) => records.map((r) => {
-      const badges = {
-        'id': '🆔 ID Document',
-        'passport': '📕 Passport',
-        'address': '🏠 Proof of Address',
-        'bank': '🏦 Bank Statement',
-        'tax': '📋 Tax Document',
-        'business': '🏢 Business Doc'
-      };
-      return badges[r.type] || `📄 ${r.type || 'Document'}`;
-    }),
-  });
-
-  collection.addField('verificationStatus', {
-    columnType: 'String',
-    dependencies: ['verified'],
-    getValues: (records) => records.map((r) => {
-      return r.verified ? '✅ Verified' : '⏳ Pending';
-    }),
-  });
-
-  // Document actions
-  collection.addAction('✅ Verify Documents', {
-    scope: 'Bulk',
+  // Actions
+  collection.addAction('📊 Customer Overview', {
+    scope: 'Single',
     execute: async (context, resultBuilder) => {
-      const userEmail = context.caller.email;
-      if (!hasPermission(userEmail, 'verify_document')) {
-        return resultBuilder.error('❌ You do not have permission to verify documents');
-      }
-      
-      const recordIds = await context.getRecordIds();
-      
-      // Update documents
-      await context.dataSource.getCollection('documents').update(
-        { conditionTree: { field: 'id', operator: 'In', value: recordIds } },
-        { verified: true }
-      );
-      
-      return resultBuilder.success(`✅ ${recordIds.length} documents verified`);
+      const customer = await context.getRecord(['id', 'email', 'first_name', 'last_name', 'business_name', 'type', 'created_at']);
+
+      // Get related data
+      const accounts = await context.dataSource
+        .getCollection('accounts')
+        .list(context.caller, { field: 'customer_id', operator: 'Equal', value: customer.id }, null);
+
+      const applications = await context.dataSource
+        .getCollection('applications')
+        .list(context.caller, { field: 'customer_id', operator: 'Equal', value: customer.id }, null);
+
+      const alerts = await context.dataSource
+        .getCollection('alerts')
+        .list(context.caller, { field: 'customer_id', operator: 'Equal', value: customer.id }, null);
+
+      const customerName = customer.type === 'business' 
+        ? customer.business_name 
+        : `${customer.first_name} ${customer.last_name}`;
+
+      const message = `
+📊 CUSTOMER OVERVIEW
+━━━━━━━━━━━━━━━━━━━━━━
+
+${customer.type === 'business' ? '🏢' : '👤'} ${customerName}
+📧 ${customer.email}
+📅 Member since: ${getTimeSince(customer.created_at)}
+
+💳 ACCOUNTS: ${accounts.length}
+${accounts.map(acc => `• ${acc.iban} - ${formatCurrency(acc.balance_cents)} (${acc.status})`).join('\n')}
+
+📋 APPLICATIONS: ${applications.length}
+${applications.map(app => `• ${app.status} (Risk: ${app.risk_score})`).join('\n')}
+
+🚨 ALERTS: ${alerts.length}
+${alerts.map(alert => `• ${alert.type} - ${alert.severity} (${alert.status})`).join('\n')}
+      `;
+
+      return resultBuilder.success(message);
     },
   });
 
-  console.log('✅ Documents collection enhanced');
+  collection.addAction('🚩 Flag Customer', {
+    scope: 'Single',
+    form: [
+      {
+        label: 'Flag Reason',
+        type: 'TextArea',
+        isRequired: true
+      }
+    ],
+    execute: async (context, resultBuilder) => {
+      if (!hasPermission(context.caller.email, 'flag_customer')) {
+        return resultBuilder.error('❌ You do not have permission to flag customers');
+      }
+
+      const customer = await context.getRecord(['id', 'email']);
+      const reason = context.formValues['Flag Reason'];
+
+      // Create note
+      await context.dataSource.getCollection('notes').create(context.caller, [{
+        entity_type: 'customer',
+        entity_id: customer.id,
+        author: context.caller.email,
+        body: `🚩 FLAGGED: ${reason}`
+      }]);
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
+        action: 'customer_flagged',
+        entity: 'customer',
+        entity_id: customer.id,
+        payload: { email: customer.email, reason }
+      }]);
+
+      return resultBuilder.success(`🚩 Customer flagged: ${reason}`);
+    },
+  });
+
+  console.log('✅ Customers collection customized');
+});
+
+// ========================================
+// ACCOUNTS COLLECTION
+// ========================================
+
+agent.customizeCollection('accounts', collection => {
+  
+  collection.addField('statusBadge', {
+    columnType: 'String',
+    dependencies: ['status'],
+    getValues: (records) => records.map((r) => `${getStatusIcon(r.status)} ${r.status?.toUpperCase() || 'UNKNOWN'}`),
+  });
+
+  collection.addField('balanceFormatted', {
+    columnType: 'String',
+    dependencies: ['balance_cents', 'currency'],
+    getValues: (records) => records.map((r) => formatCurrency(r.balance_cents || 0, r.currency || 'EUR')),
+  });
+
+  collection.addField('accountSummary', {
+    columnType: 'String',
+    dependencies: ['iban', 'balance_cents', 'currency', 'status'],
+    getValues: (records) => records.map((r) => {
+      return `${r.iban || 'No IBAN'} | ${formatCurrency(r.balance_cents || 0, r.currency)} | ${r.status}`;
+    }),
+  });
+
+  // Segments
+  collection.addSegment('✅ Active Accounts', async () => ({
+    field: 'status',
+    operator: 'Equal',
+    value: 'active'
+  }));
+
+  collection.addSegment('🧊 Frozen Accounts', async () => ({
+    field: 'status',
+    operator: 'Equal',
+    value: 'frozen'
+  }));
+
+  collection.addSegment('❌ Closed Accounts', async () => ({
+    field: 'status',
+    operator: 'Equal',
+    value: 'closed'
+  }));
+
+  collection.addSegment('💰 High Balance (>€10k)', async () => ({
+    field: 'balance_cents',
+    operator: 'GreaterThan',
+    value: 1000000
+  }));
+
+  // Actions
+  collection.addAction('🧊 Freeze Account', {
+    scope: 'Single',
+    form: [
+      {
+        label: 'Reason for Freezing',
+        type: 'TextArea',
+        isRequired: true
+      }
+    ],
+    execute: async (context, resultBuilder) => {
+      if (!hasPermission(context.caller.email, 'freeze_account')) {
+        return resultBuilder.error('❌ You do not have permission to freeze accounts');
+      }
+
+      const account = await context.getRecord(['id', 'iban', 'status']);
+
+      if (account.status === 'frozen') {
+        return resultBuilder.error('❌ This account is already frozen');
+      }
+
+      if (account.status === 'closed') {
+        return resultBuilder.error('❌ Cannot freeze a closed account');
+      }
+
+      const reason = context.formValues['Reason for Freezing'];
+
+      await context.dataSource
+        .getCollection('accounts')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: account.id }], {
+          status: 'frozen'
+        });
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
+        action: 'account_frozen',
+        entity: 'account',
+        entity_id: account.id,
+        payload: { iban: account.iban, reason, previous_status: account.status }
+      }]);
+
+      return resultBuilder.success(`🧊 Account ${account.iban} frozen. Reason: ${reason}`);
+    },
+  });
+
+  collection.addAction('✅ Unfreeze Account', {
+    scope: 'Single',
+    execute: async (context, resultBuilder) => {
+      if (!hasPermission(context.caller.email, 'unfreeze_account')) {
+        return resultBuilder.error('❌ You do not have permission to unfreeze accounts');
+      }
+
+      const account = await context.getRecord(['id', 'iban', 'status']);
+
+      if (account.status !== 'frozen') {
+        return resultBuilder.error('❌ This account is not frozen');
+      }
+
+      await context.dataSource
+        .getCollection('accounts')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: account.id }], {
+          status: 'active'
+        });
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
+        action: 'account_unfrozen',
+        entity: 'account',
+        entity_id: account.id,
+        payload: { iban: account.iban }
+      }]);
+
+      return resultBuilder.success(`✅ Account ${account.iban} unfrozen and reactivated`);
+    },
+  });
+
+  collection.addAction('❌ Close Account', {
+    scope: 'Single',
+    form: [
+      {
+        label: 'Closure Reason',
+        type: 'TextArea',
+        isRequired: true
+      }
+    ],
+    execute: async (context, resultBuilder) => {
+      if (!hasPermission(context.caller.email, 'close_account')) {
+        return resultBuilder.error('❌ You do not have permission to close accounts');
+      }
+
+      const account = await context.getRecord(['id', 'iban', 'status', 'balance_cents']);
+
+      if (account.status === 'closed') {
+        return resultBuilder.error('❌ This account is already closed');
+      }
+
+      if (account.balance_cents !== 0) {
+        return resultBuilder.error(`❌ Cannot close account with non-zero balance: ${formatCurrency(account.balance_cents)}`);
+      }
+
+      const reason = context.formValues['Closure Reason'];
+
+      await context.dataSource
+        .getCollection('accounts')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: account.id }], {
+          status: 'closed'
+        });
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
+        action: 'account_closed',
+        entity: 'account',
+        entity_id: account.id,
+        payload: { iban: account.iban, reason }
+      }]);
+
+      return resultBuilder.success(`❌ Account ${account.iban} closed. Reason: ${reason}`);
+    },
+  });
+
+  collection.addAction('🧊 Bulk Freeze Accounts', {
+    scope: 'Bulk',
+    form: [
+      {
+        label: 'Reason for Freezing',
+        type: 'TextArea',
+        isRequired: true
+      }
+    ],
+    execute: async (context, resultBuilder) => {
+      if (!hasPermission(context.caller.email, 'bulk_freeze_accounts')) {
+        return resultBuilder.error('❌ You do not have permission to bulk freeze accounts');
+      }
+
+      const recordIds = await context.getRecordIds();
+      const reason = context.formValues['Reason for Freezing'];
+
+      await context.dataSource
+        .getCollection('accounts')
+        .update(context.caller, [{ field: 'id', operator: 'In', value: recordIds }], {
+          status: 'frozen'
+        });
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
+        action: 'bulk_accounts_frozen',
+        entity: 'account',
+        entity_id: null,
+        payload: { count: recordIds.length, account_ids: recordIds, reason }
+      }]);
+
+      return resultBuilder.success(`🧊 ${recordIds.length} accounts frozen`);
+    },
+  });
+
+  console.log('✅ Accounts collection customized');
 });
 
 // ========================================
@@ -1565,17 +1674,24 @@ agent.customizeCollection('documents', collection => {
 
 agent.customizeCollection('transactions', collection => {
   
-  collection.addField('amountFormatted', {
-    columnType: 'String',
-    dependencies: ['amount_cents'],
-    getValues: (records) => records.map((r) => formatCurrency(r.amount_cents || 0)),
-  });
-
   collection.addField('directionBadge', {
     columnType: 'String',
     dependencies: ['direction'],
     getValues: (records) => records.map((r) => {
-      return r.direction === 'in' ? '📥 Incoming' : '📤 Outgoing';
+      const badges = {
+        in: '⬇️ Incoming',
+        out: '⬆️ Outgoing'
+      };
+      return badges[r.direction] || '⚪ Unknown';
+    }),
+  });
+
+  collection.addField('amountFormatted', {
+    columnType: 'String',
+    dependencies: ['amount_cents', 'direction'],
+    getValues: (records) => records.map((r) => {
+      const formatted = formatCurrency(r.amount_cents || 0);
+      return r.direction === 'in' ? `+${formatted}` : `-${formatted}`;
     }),
   });
 
@@ -1588,24 +1704,26 @@ agent.customizeCollection('transactions', collection => {
   collection.addField('merchantBadge', {
     columnType: 'String',
     dependencies: ['merchant_category'],
-    getValues: (records) => records.map((r) => {
-      const badges = {
-        'retail': '🛍️ Retail',
-        'food': '🍔 Food',
-        'transport': '🚗 Transport',
-        'entertainment': '🎬 Entertainment',
-        'utilities': '💡 Utilities',
-        'financial': '🏦 Financial'
-      };
-      return badges[r.merchant_category] || `📌 ${r.merchant_category || 'Other'}`;
-    }),
+    getValues: (records) => records.map((r) => r.merchant_category ? `🏷️ ${r.merchant_category}` : '⚪ No Category'),
   });
 
-  // Transaction workspaces
-  collection.addSegment('💰 Large Transactions', async () => ({
+  // Segments
+  collection.addSegment('⬇️ Incoming Transactions', async () => ({
+    field: 'direction',
+    operator: 'Equal',
+    value: 'in'
+  }));
+
+  collection.addSegment('⬆️ Outgoing Transactions', async () => ({
+    field: 'direction',
+    operator: 'Equal',
+    value: 'out'
+  }));
+
+  collection.addSegment('💰 Large Transactions (>€1k)', async () => ({
     field: 'amount_cents',
     operator: 'GreaterThan',
-    value: 1000000
+    value: 100000
   }));
 
   collection.addSegment('📅 Today\'s Transactions', async () => {
@@ -1619,19 +1737,110 @@ agent.customizeCollection('transactions', collection => {
     };
   });
 
-  collection.addSegment('📥 Incoming', async () => ({
-    field: 'direction',
+  collection.addSegment('📊 Last 7 Days', async () => {
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    
+    return {
+      field: 'occurred_at',
+      operator: 'GreaterThan',
+      value: weekAgo.toISOString()
+    };
+  });
+
+  console.log('✅ Transactions collection customized');
+});
+
+// ========================================
+// DOCUMENTS COLLECTION
+// ========================================
+
+agent.customizeCollection('documents', collection => {
+  
+  collection.addField('typeBadge', {
+    columnType: 'String',
+    dependencies: ['type'],
+    getValues: (records) => records.map((r) => {
+      const badges = {
+        'passport': '🛂 Passport',
+        'id_card': '🪪 ID Card',
+        'drivers_license': '🚗 Driver\'s License',
+        'proof_of_address': '🏠 Proof of Address',
+        'bank_statement': '🏦 Bank Statement',
+        'business_registration': '🏢 Business Registration'
+      };
+      return badges[r.type] || `📄 ${r.type || 'Document'}`;
+    }),
+  });
+
+  collection.addField('verificationBadge', {
+    columnType: 'String',
+    dependencies: ['verified'],
+    getValues: (records) => records.map((r) => r.verified ? '✅ Verified' : '⏳ Pending Verification'),
+  });
+
+  // Segments
+  collection.addSegment('✅ Verified Documents', async () => ({
+    field: 'verified',
     operator: 'Equal',
-    value: 'in'
+    value: true
   }));
 
-  collection.addSegment('📤 Outgoing', async () => ({
-    field: 'direction',
+  collection.addSegment('⏳ Pending Verification', async () => ({
+    field: 'verified',
     operator: 'Equal',
-    value: 'out'
+    value: false
   }));
 
-  console.log('✅ Transactions collection enhanced');
+  // Actions
+  collection.addAction('✅ Verify Document', {
+    scope: 'Single',
+    execute: async (context, resultBuilder) => {
+      if (!hasPermission(context.caller.email, 'verify_document')) {
+        return resultBuilder.error('❌ You do not have permission to verify documents');
+      }
+
+      const document = await context.getRecord(['id', 'type', 'verified']);
+
+      if (document.verified) {
+        return resultBuilder.error('✅ This document is already verified');
+      }
+
+      await context.dataSource
+        .getCollection('documents')
+        .update(context.caller, [{ field: 'id', operator: 'Equal', value: document.id }], {
+          verified: true
+        });
+
+      // Log to audit trail
+      await context.dataSource.getCollection('audit_log').create(context.caller, [{
+        actor: context.caller.email,
+        action: 'document_verified',
+        entity: 'document',
+        entity_id: document.id,
+        payload: { type: document.type }
+      }]);
+
+      return resultBuilder.success(`✅ Document verified: ${document.type}`);
+    },
+  });
+
+  collection.addAction('✅ Bulk Verify Documents', {
+    scope: 'Bulk',
+    execute: async (context, resultBuilder) => {
+      const recordIds = await context.getRecordIds();
+
+      await context.dataSource
+        .getCollection('documents')
+        .update(context.caller, [{ field: 'id', operator: 'In', value: recordIds }], {
+          verified: true
+        });
+
+      return resultBuilder.success(`✅ ${recordIds.length} documents verified`);
+    },
+  });
+
+  console.log('✅ Documents collection customized');
 });
 
 // ========================================
@@ -1640,6 +1849,12 @@ agent.customizeCollection('transactions', collection => {
 
 agent.customizeCollection('notes', collection => {
   
+  collection.addField('authorBadge', {
+    columnType: 'String',
+    dependencies: ['author'],
+    getValues: (records) => records.map((r) => `👤 ${r.author || 'Unknown'}`),
+  });
+
   collection.addField('noteAge', {
     columnType: 'String',
     dependencies: ['created_at'],
@@ -1651,17 +1866,35 @@ agent.customizeCollection('notes', collection => {
     dependencies: ['entity_type'],
     getValues: (records) => records.map((r) => {
       const badges = {
-        alert: '🚨 Alert',
-        application: '📋 Application',
-        account: '💳 Account',
-        customer: '👤 Customer',
-        case: '📂 Case'
+        'application': '📋 Application',
+        'alert': '🚨 Alert',
+        'account': '💳 Account',
+        'case': '📂 Case',
+        'customer': '👤 Customer'
       };
-      return badges[r.entity_type] || '📝 Note';
+      return badges[r.entity_type] || `📌 ${r.entity_type || 'Entity'}`;
     }),
   });
 
-  console.log('✅ Notes collection enhanced');
+  // Segments
+  collection.addSegment('👤 My Notes', async (context) => ({
+    field: 'author',
+    operator: 'Equal',
+    value: context.caller.email
+  }));
+
+  collection.addSegment('📅 Recent Notes (7d)', async () => {
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    
+    return {
+      field: 'created_at',
+      operator: 'GreaterThan',
+      value: weekAgo.toISOString()
+    };
+  });
+
+  console.log('✅ Notes collection customized');
 });
 
 // ========================================
@@ -1670,13 +1903,10 @@ agent.customizeCollection('notes', collection => {
 
 agent.customizeCollection('audit_log', collection => {
   
-  collection.addField('actorRole', {
+  collection.addField('actorBadge', {
     columnType: 'String',
     dependencies: ['actor'],
-    getValues: (records) => records.map((r) => {
-      const role = getUserRole(r.actor);
-      return getRoleBadge(role);
-    }),
+    getValues: (records) => records.map((r) => `👤 ${r.actor || 'System'}`),
   });
 
   collection.addField('actionBadge', {
@@ -1684,17 +1914,19 @@ agent.customizeCollection('audit_log', collection => {
     dependencies: ['action'],
     getValues: (records) => records.map((r) => {
       const badges = {
-        'application_approved': '✅ Approved',
-        'application_rejected': '❌ Rejected',
-        'alert_escalated': '🚨 Escalated',
-        'alert_dismissed': '✅ Dismissed',
-        'alert_triaged': '🔍 Triaged',
-        'account_frozen': '🔒 Frozen',
-        'account_unfrozen': '🔓 Unfrozen',
+        'application_approved': '✅ Application Approved',
+        'application_rejected': '❌ Application Rejected',
+        'alert_investigated': '🔍 Alert Investigated',
+        'alert_escalated': '⚠️ Alert Escalated',
+        'alert_dismissed': '✖️ Alert Dismissed',
         'case_opened': '📂 Case Opened',
-        'case_closed': '✔️ Case Closed'
+        'case_closed': '✅ Case Closed',
+        'account_frozen': '🧊 Account Frozen',
+        'account_unfrozen': '✅ Account Unfrozen',
+        'document_verified': '✅ Document Verified',
+        'customer_flagged': '🚩 Customer Flagged'
       };
-      return badges[r.action] || `📝 ${r.action}`;
+      return badges[r.action] || `📌 ${r.action || 'Action'}`;
     }),
   });
 
@@ -1719,7 +1951,7 @@ agent.customizeCollection('audit_log', collection => {
     getValues: (records) => records.map((r) => getTimeSince(r.created_at)),
   });
 
-  // Audit workspaces
+  // Segments
   collection.addSegment('📅 Today\'s Activity', async () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1743,11 +1975,11 @@ agent.customizeCollection('audit_log', collection => {
     value: ['application_approved', 'bulk_application_approved']
   }));
 
-  console.log('✅ Audit log collection enhanced');
+  console.log('✅ Audit log collection customized');
 });
 
 // ========================================
-// USERS COLLECTION (if exists)
+// USERS COLLECTION
 // ========================================
 
 agent.customizeCollection('users', collection => {
@@ -1758,8 +1990,199 @@ agent.customizeCollection('users', collection => {
     getValues: (records) => records.map((r) => getRoleBadge(r.role)),
   });
 
-  console.log('✅ Users collection enhanced');
+  console.log('✅ Users collection customized');
 });
+
+// ========================================
+// DASHBOARD CHARTS
+// ========================================
+
+agent.addChart('applications_by_status', async (context, resultBuilder) => {
+  const applications = await context.dataSource
+    .getCollection('applications')
+    .aggregate(context.caller, null, {
+      operation: 'Count',
+      groups: [{ field: 'status' }]
+    });
+
+  return resultBuilder.distribution(
+    applications.reduce((acc, row) => {
+      acc[row.group.status || 'unknown'] = row.value;
+      return acc;
+    }, {})
+  );
+});
+
+agent.addChart('applications_risk_distribution', async (context, resultBuilder) => {
+  const applications = await context.dataSource
+    .getCollection('applications')
+    .list(context.caller, { field: 'id', operator: 'Present' }, null);
+
+  const distribution = {
+    'Low (0-39)': 0,
+    'Medium (40-59)': 0,
+    'High (60-79)': 0,
+    'Critical (80-100)': 0
+  };
+
+  applications.forEach(app => {
+    const score = app.risk_score || 0;
+    if (score < 40) distribution['Low (0-39)']++;
+    else if (score < 60) distribution['Medium (40-59)']++;
+    else if (score < 80) distribution['High (60-79)']++;
+    else distribution['Critical (80-100)']++;
+  });
+
+  return resultBuilder.distribution(distribution);
+});
+
+agent.addChart('alerts_by_severity', async (context, resultBuilder) => {
+  const alerts = await context.dataSource
+    .getCollection('alerts')
+    .aggregate(context.caller, null, {
+      operation: 'Count',
+      groups: [{ field: 'severity' }]
+    });
+
+  return resultBuilder.distribution(
+    alerts.reduce((acc, row) => {
+      acc[row.group.severity || 'unknown'] = row.value;
+      return acc;
+    }, {})
+  );
+});
+
+agent.addChart('alerts_by_status', async (context, resultBuilder) => {
+  const alerts = await context.dataSource
+    .getCollection('alerts')
+    .aggregate(context.caller, null, {
+      operation: 'Count',
+      groups: [{ field: 'status' }]
+    });
+
+  return resultBuilder.distribution(
+    alerts.reduce((acc, row) => {
+      acc[row.group.status || 'unknown'] = row.value;
+      return acc;
+    }, {})
+  );
+});
+
+agent.addChart('cases_by_priority', async (context, resultBuilder) => {
+  const cases = await context.dataSource
+    .getCollection('cases')
+    .aggregate(context.caller, null, {
+      operation: 'Count',
+      groups: [{ field: 'priority' }]
+    });
+
+  return resultBuilder.distribution(
+    cases.reduce((acc, row) => {
+      acc[row.group.priority || 'unknown'] = row.value;
+      return acc;
+    }, {})
+  );
+});
+
+agent.addChart('accounts_by_status', async (context, resultBuilder) => {
+  const accounts = await context.dataSource
+    .getCollection('accounts')
+    .aggregate(context.caller, null, {
+      operation: 'Count',
+      groups: [{ field: 'status' }]
+    });
+
+  return resultBuilder.distribution(
+    accounts.reduce((acc, row) => {
+      acc[row.group.status || 'unknown'] = row.value;
+      return acc;
+    }, {})
+  );
+});
+
+agent.addChart('total_balance', async (context, resultBuilder) => {
+  const accounts = await context.dataSource
+    .getCollection('accounts')
+    .aggregate(context.caller, { field: 'status', operator: 'Equal', value: 'active' }, {
+      operation: 'Sum',
+      field: 'balance_cents'
+    });
+
+  const totalCents = accounts[0]?.value || 0;
+  return resultBuilder.value(totalCents / 100);
+});
+
+agent.addChart('transactions_over_time', async (context, resultBuilder) => {
+  const transactions = await context.dataSource
+    .getCollection('transactions')
+    .aggregate(context.caller, null, {
+      operation: 'Count',
+      groups: [{ field: 'occurred_at', operation: 'Day' }]
+    });
+
+  const data = transactions.map(row => ({
+    label: new Date(row.group.occurred_at).toLocaleDateString(),
+    values: { count: row.value }
+  }));
+
+  return resultBuilder.timeBased('Day', data);
+});
+
+agent.addChart('transaction_volume_by_direction', async (context, resultBuilder) => {
+  const transactions = await context.dataSource
+    .getCollection('transactions')
+    .aggregate(context.caller, null, {
+      operation: 'Sum',
+      field: 'amount_cents',
+      groups: [{ field: 'direction' }]
+    });
+
+  return resultBuilder.distribution(
+    transactions.reduce((acc, row) => {
+      acc[row.group.direction || 'unknown'] = (row.value || 0) / 100;
+      return acc;
+    }, {})
+  );
+});
+
+agent.addChart('applications_over_time', async (context, resultBuilder) => {
+  const applications = await context.dataSource
+    .getCollection('applications')
+    .aggregate(context.caller, null, {
+      operation: 'Count',
+      groups: [{ field: 'submitted_at', operation: 'Day' }]
+    });
+
+  const data = applications.map(row => ({
+    label: new Date(row.group.submitted_at).toLocaleDateString(),
+    values: { count: row.value }
+  }));
+
+  return resultBuilder.timeBased('Day', data);
+});
+
+agent.addChart('top_merchants_by_transaction_count', async (context, resultBuilder) => {
+  const transactions = await context.dataSource
+    .getCollection('transactions')
+    .aggregate(context.caller, null, {
+      operation: 'Count',
+      groups: [{ field: 'merchant_category' }]
+    });
+
+  const sorted = transactions
+    .filter(row => row.group.merchant_category)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10);
+
+  return resultBuilder.distribution(
+    sorted.reduce((acc, row) => {
+      acc[row.group.merchant_category] = row.value;
+      return acc;
+    }, {})
+  );
+});
+
+console.log('✅ Dashboard charts configured');
 
 // ========================================
 // GLOBAL PERMISSION CHECK ACTION
@@ -1773,30 +2196,21 @@ agent.customizeCollection('applications', collection => {
       const role = getUserRole(userEmail);
       
       const permissions = {
-        // Onboarding
         canApprove: hasPermission(userEmail, 'approve_application'),
         canReject: hasPermission(userEmail, 'reject_application'),
         canRequestInfo: hasPermission(userEmail, 'request_more_info'),
         canBulkApprove: hasPermission(userEmail, 'bulk_approve_applications'),
-        
-        // AML Monitoring
         canInvestigate: hasPermission(userEmail, 'investigate_alert'),
         canEscalate: hasPermission(userEmail, 'escalate_alert'),
         canDismiss: hasPermission(userEmail, 'dismiss_alert'),
         canBulkDismiss: hasPermission(userEmail, 'bulk_dismiss_alerts'),
         canAssign: hasPermission(userEmail, 'assign_alert'),
-        
-        // Case Management
         canCreateCase: hasPermission(userEmail, 'create_case'),
         canUpdateCase: hasPermission(userEmail, 'update_case'),
         canCloseCase: hasPermission(userEmail, 'close_case'),
-        
-        // Account Management
         canFreeze: hasPermission(userEmail, 'freeze_account'),
         canUnfreeze: hasPermission(userEmail, 'unfreeze_account'),
         canBulkFreeze: hasPermission(userEmail, 'bulk_freeze_accounts'),
-        
-        // Other
         canViewMetrics: hasPermission(userEmail, 'view_metrics'),
         canExportData: hasPermission(userEmail, 'export_data'),
         canManageInbox: hasPermission(userEmail, 'manage_inbox'),
@@ -1871,7 +2285,7 @@ agent.start().catch(error => {
 
 console.log(`
 ┌────────────────────────────────────────────────────────────────┐
-│  🚀 COMPLIANCE & OPERATIONS PLATFORM - DEMO READY             │
+│  🚀 COMPLIANCE & OPERATIONS PLATFORM - FULLY CONFIGURED        │
 ├────────────────────────────────────────────────────────────────┤
 │                                                                │
 │  🎯 DEMO MODE: ${DEMO_MODE ? 'ENABLED ✅' : 'DISABLED ❌'}                                   │
@@ -1884,25 +2298,40 @@ console.log(`
 │  • Approve/Reject/Request Info actions                        │
 │  • Bulk operations                                            │
 │  • Sanctions & KYC management                                 │
+│  • Smart inbox for new submissions                            │
 │                                                                │
 │  🚨 AML MONITORING:                                           │
 │  • Alert triage & investigation                               │
 │  • Risk visualization                                         │
 │  • Case escalation                                            │
 │  • Bulk dismissals                                            │
+│  • Severity-based workspaces                                  │
 │                                                                │
 │  💼 COMPLETE FEATURE SET:                                     │
-│  • 30+ Smart Actions                                          │
-│  • 40+ Smart Fields                                           │
-│  • 35+ Workspaces/Segments                                    │
+│  • 40+ Smart Actions                                          │
+│  • 50+ Smart Fields                                           │
+│  • 45+ Workspaces/Segments                                    │
+│  • 10+ Dashboard Charts                                       │
 │  • Full Audit Trail                                           │
 │  • Role-based Permissions                                     │
+│  • Inbox Management                                           │
 │                                                                │
 │  📊 COLLECTIONS:                                              │
 │  • applications • alerts • aml_alerts                         │
 │  • cases • accounts • customers                               │
 │  • documents • transactions • notes                           │
 │  • audit_log • users                                          │
+│                                                                │
+│  📈 DASHBOARD CHARTS:                                         │
+│  • Applications by Status                                     │
+│  • Applications Risk Distribution                             │
+│  • Alerts by Severity & Status                                │
+│  • Cases by Priority                                          │
+│  • Accounts by Status                                         │
+│  • Total Balance                                              │
+│  • Transactions Over Time                                     │
+│  • Transaction Volume by Direction                            │
+│  • Top Merchants                                              │
 │                                                                │
 └────────────────────────────────────────────────────────────────┘
 `);
